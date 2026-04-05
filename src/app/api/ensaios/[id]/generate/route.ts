@@ -52,11 +52,16 @@ async function runGeneration(ensaioId: string, ensaio: any) {
     const triggerWord = ensaio.loraModel.triggerWord
     const inspirationContext = ensaio.inspirationPhotoUrl ? ', inspired by the reference style and mood' : ''
 
-    // Usar o modelo treinado diretamente no Replicate
+    // Buscar versao do modelo treinado no Replicate
     const username = process.env.REPLICATE_USERNAME || 'studio'
     const modelName = triggerWord.toLowerCase().replace(/[^a-z0-9_-]/g, '-')
     const trainedModel = `${username}/${modelName}`
-    console.log(`[Generate] Usando modelo treinado: ${trainedModel}`)
+    console.log(`[Generate] Buscando modelo treinado: ${trainedModel}`)
+
+    const modelInfo = await replicate.models.get(username, modelName)
+    const trainedVersion = modelInfo.latest_version?.id
+    if (!trainedVersion) throw new Error(`Modelo ${trainedModel} nao tem versao disponivel`)
+    console.log(`[Generate] Usando versao: ${trainedVersion}`)
 
     // Expandir prompts
     const allPrompts: string[] = []
@@ -83,8 +88,8 @@ async function runGeneration(ensaioId: string, ensaio: any) {
           })
 
           try {
-            // 1. Gerar com modelo treinado (FLUX + LoRA integrado)
-            const rawUrl = await runPrediction(trainedModel, {
+            // 1. Gerar com modelo treinado (FLUX + LoRA via version)
+            const rawUrl = await runPredictionByVersion(trainedVersion, {
               prompt: fullPrompt,
               num_outputs: 1,
               aspect_ratio: '3:4',
@@ -171,11 +176,6 @@ async function runGeneration(ensaioId: string, ensaio: any) {
     console.error('[Generate Error]', error)
     await db.ensaio.update({ where: { id: ensaioId }, data: { status: 'trained' } })
   }
-}
-
-async function runPrediction(model: string, input: Record<string, any>): Promise<string | null> {
-  const prediction = await replicate.predictions.create({ model, input })
-  return pollPrediction(prediction.id)
 }
 
 async function runPredictionByVersion(version: string, input: Record<string, any>): Promise<string | null> {
