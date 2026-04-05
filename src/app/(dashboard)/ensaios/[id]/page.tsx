@@ -212,11 +212,31 @@ export default function EnsaioDetailPage() {
 
         {/* 3. Prompts de Geracao */}
         <section>
-          <h3 className="font-display text-lg mb-3">
-            3. Descricao das <span className="text-gold-400 italic">Fotos</span>
-            <span className="text-xs text-white/30 ml-2">({ensaio.prompts.length} prompts)</span>
-          </h3>
-          <p className="text-xs text-white/30 mb-3">Descreva cada foto que quer gerar. Cada descricao gera uma foto diferente.</p>
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="font-display text-lg">
+              3. Descricao das <span className="text-gold-400 italic">Fotos</span>
+              <span className="text-xs text-white/30 ml-2">({ensaio.prompts.length} prompts · {totalToGenerate} fotos)</span>
+            </h3>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-white/30">Fotos por prompt:</span>
+              <select
+                value={ensaio.photosPerPrompt}
+                onChange={async (e) => {
+                  const v = Number(e.target.value)
+                  await fetch(`/api/ensaios/${ensaioId}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ photosPerPrompt: v }),
+                  })
+                  fetchEnsaio()
+                }}
+                className="px-2 py-1 bg-white/[0.06] border border-gold-400/20 rounded-lg text-xs text-[#f0ece4] outline-none focus:border-gold-400/50"
+              >
+                {[1,2,3,4,5].map(n => <option key={n} value={n}>{n}</option>)}
+              </select>
+            </div>
+          </div>
+          <p className="text-xs text-white/30 mb-3">Descreva cada foto que quer gerar. Cada descricao gera {ensaio.photosPerPrompt > 1 ? `${ensaio.photosPerPrompt} variacoes` : 'uma foto'} diferente.</p>
 
           {/* Lista de prompts existentes */}
           {ensaio.prompts.length > 0 && (

@@ -2,9 +2,25 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { replicate, REPLICATE_VERSIONS } from '@/lib/replicate'
 import { scoreFaceSimilarity, isFaceScoringAvailable } from '@/lib/face-scoring'
-import { getPresignedDownloadUrl } from '@/lib/r2'
+import { r2Client, getPresignedDownloadUrl, getPublicProxyUrl } from '@/lib/r2'
+import { PutObjectCommand } from '@aws-sdk/client-s3'
 
 const BATCH_SIZE = 3
+const R2_BUCKET_NAME = process.env.R2_BUCKET_NAME || 'ensaio-studio'
+
+async function persistToR2(url: string, ensaioId: string, photoId: string, suffix: string): Promise<string> {
+  const res = await fetch(url)
+  if (!res.ok) throw new Error(`Download failed: ${res.status}`)
+  const buffer = Buffer.from(await res.arrayBuffer())
+  const key = `ensaios/${ensaioId}/generated/${photoId}-${suffix}.png`
+  await r2Client.send(new PutObjectCommand({
+    Bucket: R2_BUCKET_NAME,
+    Key: key,
+    Body: buffer,
+    ContentType: 'image/png',
+  }))
+  return getPublicProxyUrl(key)
+}
 
 // POST /api/ensaios/[id]/generate — gerar fotos
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -81,31 +97,35 @@ async function runGeneration(ensaioId: string, ensaio: any) {
 
             if (!rawUrl) throw new Error('Geracao falhou')
 
+            // Persistir raw no R2 imediatamente (URL do Replicate expira em ~1h)
+            const rawR2Url = await persistToR2(rawUrl, ensaioId, generatedPhoto.id, 'raw')
             await db.generatedPhoto.update({
               where: { id: generatedPhoto.id },
-              data: { rawUrl, status: 'upscaling' },
+              data: { rawUrl: rawR2Url, status: 'upscaling' },
             })
 
             // 2. Upscale com Real-ESRGAN
-            const upscaledUrl = await runPredictionByVersion(REPLICATE_VERSIONS.REAL_ESRGAN, {
+            const upscaledReplicateUrl = await runPredictionByVersion(REPLICATE_VERSIONS.REAL_ESRGAN, {
               image: rawUrl,
               scale: 4,
               face_enhance: true,
             }) || rawUrl
 
+            const upscaledUrl = await persistToR2(upscaledReplicateUrl, ensaioId, generatedPhoto.id, 'upscaled')
             await db.generatedPhoto.update({
               where: { id: generatedPhoto.id },
               data: { upscaledUrl, status: 'restoring' },
             })
 
             // 3. Restauracao facial com CodeFormer
-            const restoredUrl = await runPredictionByVersion(REPLICATE_VERSIONS.CODEFORMER, {
-              image: upscaledUrl,
+            const restoredReplicateUrl = await runPredictionByVersion(REPLICATE_VERSIONS.CODEFORMER, {
+              image: upscaledReplicateUrl,
               upscale: 2,
               face_upsample: true,
               codeformer_fidelity: 0.7,
-            }) || upscaledUrl
+            }) || upscaledReplicateUrl
 
+            const restoredUrl = await persistToR2(restoredReplicateUrl, ensaioId, generatedPhoto.id, 'restored')
             await db.generatedPhoto.update({
               where: { id: generatedPhoto.id },
               data: { restoredUrl, status: 'scoring' },

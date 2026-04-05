@@ -157,6 +157,17 @@ export default function ReviewPage() {
                     <p>Status: {selectedPhoto.status}</p>
                   </div>
 
+                  {/* Download */}
+                  {(selectedPhoto.restoredUrl || selectedPhoto.rawUrl) && (
+                    <a
+                      href={selectedPhoto.restoredUrl || selectedPhoto.rawUrl || ''}
+                      download
+                      className="w-full py-2 bg-white/[0.06] text-white/60 border border-white/10 rounded-xl text-xs text-center hover:bg-white/[0.10] transition block"
+                    >
+                      ↓ Download
+                    </a>
+                  )}
+
                   {/* Versoes da imagem */}
                   <div className="space-y-1">
                     <p className="text-xs text-white/40">Versoes:</p>
