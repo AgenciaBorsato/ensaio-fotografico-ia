@@ -4,7 +4,7 @@ import { useState, useRef, useCallback } from 'react'
 
 interface PhotoUploaderProps {
   ensaioId: string
-  type: 'templates' | 'references' | 'inspiration'
+  type: 'references' | 'inspiration'
   maxFiles: number
   onUploadComplete?: () => void
 }
@@ -18,23 +18,17 @@ export default function PhotoUploader({ ensaioId, type, maxFiles, onUploadComple
   const inputRef = useRef<HTMLInputElement>(null)
 
   const uploadFile = async (file: File) => {
-    const presignRes = await fetch('/api/upload/presign', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ensaioId, type, contentType: file.type, filename: file.name }),
-    })
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('ensaioId', ensaioId)
+    formData.append('type', type)
 
-    if (!presignRes.ok) throw new Error('Erro ao obter URL de upload')
-    const { uploadUrl, key } = await presignRes.json()
-
-    const uploadRes = await fetch(uploadUrl, {
-      method: 'PUT',
-      headers: { 'Content-Type': file.type },
-      body: file,
-    })
-
-    if (!uploadRes.ok) throw new Error('Erro no upload')
-    return key
+    const res = await fetch('/api/upload', { method: 'POST', body: formData })
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}))
+      throw new Error(data.error || 'Erro no upload')
+    }
+    return res.json()
   }
 
   const handleFiles = useCallback(async (files: FileList | File[]) => {
@@ -62,7 +56,6 @@ export default function PhotoUploader({ ensaioId, type, maxFiles, onUploadComple
   }, [ensaioId, type, maxFiles, onUploadComplete])
 
   const labels = {
-    templates: { desc: 'Arraste as fotos template do ensaio', icon: '📸' },
     references: { desc: 'Arraste 1-12 fotos do rosto do cliente', icon: '👤' },
     inspiration: { desc: 'Arraste a foto de inspiracao (estilo/mood)', icon: '✨' },
   }
