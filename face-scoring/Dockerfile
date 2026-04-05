@@ -2,8 +2,10 @@ FROM python:3.11-slim-bookworm
 
 WORKDIR /app
 
-# Dependencias de sistema para OpenCV e InsightFace
+# Dependencias de sistema: OpenCV, InsightFace, compilador C++
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    g++ \
     libgl1 \
     libglib2.0-0 \
     libsm6 \
