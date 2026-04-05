@@ -40,10 +40,15 @@ export const trainLoraJob = task({
 
     try {
       // Iniciar treino no Replicate
+      // Buscar a versao mais recente do modelo
+      const model = await replicate.models.get('ostris', 'flux-dev-lora-trainer')
+      const latestVersion = model.latest_version?.id
+      if (!latestVersion) throw new Error('Nao foi possivel encontrar a versao do modelo de treino')
+
       const training = await replicate.trainings.create(
         'ostris',
         'flux-dev-lora-trainer',
-        '26dce37a',
+        latestVersion,
         {
           destination: `${process.env.REPLICATE_USERNAME || 'studio'}/${triggerWord.toLowerCase()}` as `${string}/${string}`,
           input: {
