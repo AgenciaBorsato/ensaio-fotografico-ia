@@ -76,7 +76,7 @@ async function runGeneration(ensaioId: string, ensaio: any) {
 
       await Promise.allSettled(
         batch.map(async (promptText) => {
-          const fullPrompt = `${promptText}, photo of ${triggerWord}${inspirationContext}, professional photography, high quality, detailed face, sharp focus, 8k`
+          const fullPrompt = `a photo of ${triggerWord}, ${promptText}${inspirationContext}, maintaining exact facial features of ${triggerWord}`
 
           const generatedPhoto = await db.generatedPhoto.create({
             data: {
@@ -94,9 +94,9 @@ async function runGeneration(ensaioId: string, ensaio: any) {
               num_outputs: 1,
               aspect_ratio: '3:4',
               output_format: 'png',
-              guidance_scale: 3.5,
+              guidance_scale: 4.5,
               output_quality: 95,
-              num_inference_steps: 28,
+              num_inference_steps: 30,
               seed: generatedPhoto.seed,
             })
 

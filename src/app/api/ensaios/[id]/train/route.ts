@@ -119,11 +119,12 @@ async function runTraining(
         input: {
           input_images: zipUrl,
           trigger_word: triggerWord,
-          steps: 1000,
+          steps: 1500,
           learning_rate: 0.0004,
-          lora_rank: 16,
+          lora_rank: 32,
           resolution: '1024',
           autocaption: true,
+          autocaption_prefix: `a photo of ${triggerWord}, `,
         },
       }
     )
