@@ -58,13 +58,19 @@ async function runTraining(
     for (let i = 0; i < referencePhotos.length; i++) {
       const key = referencePhotos[i].photoUrl
       const ext = key.split('.').pop()?.toLowerCase() || 'jpg'
-      const response = await r2Client.send(new GetObjectCommand({
-        Bucket: R2_BUCKET_NAME,
-        Key: key,
-      }))
-      if (!response.Body) throw new Error(`Foto nao encontrada no R2: ${key}`)
-      const bytes = await response.Body.transformToByteArray()
-      zip.file(`photo_${i + 1}.${ext}`, bytes)
+      console.log(`[Train] Baixando foto ${i + 1}/${referencePhotos.length}: ${key}`)
+      try {
+        const response = await r2Client.send(new GetObjectCommand({
+          Bucket: R2_BUCKET_NAME,
+          Key: key,
+        }))
+        if (!response.Body) throw new Error('Body vazio')
+        const bytes = await response.Body.transformToByteArray()
+        zip.file(`photo_${i + 1}.${ext}`, bytes)
+      } catch (err: any) {
+        console.error(`[Train] Foto ${i + 1} nao encontrada no R2: ${key}`, err.message)
+        throw new Error(`Foto de referencia nao encontrada no storage. Limpe as fotos e envie novamente.`)
+      }
     }
 
     const zipBuffer = await zip.generateAsync({ type: 'nodebuffer' })

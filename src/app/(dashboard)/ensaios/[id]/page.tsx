@@ -13,7 +13,7 @@ interface Ensaio {
   inspirationPhotoUrl: string | null
   prompts: string[]
   photosPerPrompt: number
-  referencePhotos: { id: string; photoUrl: string; order: number }[]
+  referencePhotos: { id: string; photoUrl: string; order: number; thumbnailUrl: string }[]
   loraModel: { status: string; progress: number; errorMessage: string | null } | null
   generatedPhotos: { id: string; status: string; prompt: string; restoredUrl: string | null; rawUrl: string | null; similarityScore: number | null }[]
 }
@@ -93,6 +93,12 @@ export default function EnsaioDetailPage() {
   if (loading) return <div className="text-center py-20 text-white/30">Carregando...</div>
   if (!ensaio) return <div className="text-center py-20 text-white/30">Ensaio nao encontrado</div>
 
+  const clearReferencePhotos = async () => {
+    if (!confirm('Limpar todas as fotos de referencia? Voce precisara enviar novamente.')) return
+    await fetch(`/api/ensaios/${ensaioId}`, { method: 'DELETE' })
+    fetchEnsaio()
+  }
+
   const canTrain = ensaio.referencePhotos.length > 0 && ensaio.loraModel?.status !== 'completed' && ensaio.loraModel?.status !== 'processing'
   const canGenerate = ensaio.loraModel?.status === 'completed' && ensaio.prompts.length > 0
   const pendingReview = ensaio.generatedPhotos.filter(p => p.status === 'pending_review').length
@@ -160,13 +166,28 @@ export default function EnsaioDetailPage() {
           </h3>
           <p className="text-xs text-white/30 mb-3">Fotos do rosto do cliente. Quanto mais variadas (angulos, luz), melhor o resultado.</p>
           {ensaio.referencePhotos.length > 0 && (
-            <div className="grid grid-cols-6 sm:grid-cols-8 md:grid-cols-12 gap-2 mb-3">
-              {ensaio.referencePhotos.map((_, i) => (
-                <div key={i} className="aspect-square rounded-lg bg-green-500/[0.08] border border-green-500/20 flex items-center justify-center text-[10px] text-green-400">
-                  ✓
-                </div>
-              ))}
-            </div>
+            <>
+              <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 gap-2 mb-3">
+                {ensaio.referencePhotos.map((photo) => (
+                  <div key={photo.id} className="aspect-square rounded-lg bg-white/[0.04] border border-gold-400/10 overflow-hidden">
+                    <img
+                      src={photo.thumbnailUrl}
+                      alt=""
+                      className="w-full h-full object-cover"
+                      onError={(e) => {
+                        const el = e.target as HTMLImageElement
+                        el.style.display = 'none'
+                        el.parentElement!.innerHTML = '<div class="w-full h-full flex items-center justify-center text-[10px] text-red-400">erro</div>'
+                      }}
+                    />
+                  </div>
+                ))}
+              </div>
+              <button onClick={clearReferencePhotos}
+                className="text-xs text-red-400/50 hover:text-red-400 transition mb-3">
+                Limpar fotos e reenviar
+              </button>
+            </>
           )}
           {ensaio.referencePhotos.length < 12 && (
             <PhotoUploader ensaioId={ensaioId} type="references" maxFiles={12 - ensaio.referencePhotos.length} onUploadComplete={fetchEnsaio} />

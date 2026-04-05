@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { getPublicProxyUrl } from '@/lib/r2'
 
 // GET /api/ensaios/[id] — detalhes do ensaio
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -16,7 +17,28 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
   if (!ensaio) return NextResponse.json({ error: 'Nao encontrado' }, { status: 404 })
 
-  return NextResponse.json(ensaio)
+  // Adicionar URLs de thumbnail para fotos de referencia
+  const ensaioWithUrls = {
+    ...ensaio,
+    referencePhotos: ensaio.referencePhotos.map((p) => ({
+      ...p,
+      thumbnailUrl: getPublicProxyUrl(p.photoUrl),
+    })),
+  }
+
+  return NextResponse.json(ensaioWithUrls)
+}
+
+// DELETE /api/ensaios/[id] — limpar fotos de referencia
+export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params
+
+  await db.referencePhoto.deleteMany({ where: { ensaioId: id } })
+  // Resetar LoRA se existir (precisa re-treinar com novas fotos)
+  await db.loraModel.deleteMany({ where: { ensaioId: id } })
+  await db.ensaio.update({ where: { id }, data: { status: 'draft' } })
+
+  return NextResponse.json({ success: true })
 }
 
 // PATCH /api/ensaios/[id] — atualizar prompts, descricao, etc

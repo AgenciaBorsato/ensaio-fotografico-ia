@@ -15,16 +15,6 @@ export const r2Client = new S3Client({
   },
 })
 
-export async function getPresignedUploadUrl(key: string, contentType: string, expiresIn = 3600) {
-  const command = new PutObjectCommand({
-    Bucket: R2_BUCKET_NAME,
-    Key: key,
-    ContentType: contentType,
-  })
-  const url = await getSignedUrl(r2Client, command, { expiresIn })
-  return { url, key }
-}
-
 export async function getPresignedDownloadUrl(key: string, expiresIn = 3600) {
   const command = new GetObjectCommand({
     Bucket: R2_BUCKET_NAME,
@@ -33,15 +23,10 @@ export async function getPresignedDownloadUrl(key: string, expiresIn = 3600) {
   return getSignedUrl(r2Client, command, { expiresIn })
 }
 
-export function buildR2Key(parts: { ensaioId: string; type: 'templates' | 'references' | 'inspiration' | 'lora' | 'generated' | 'upscaled' | 'restored'; filename: string }) {
-  return `ensaios/${parts.ensaioId}/${parts.type}/${parts.filename}`
-}
-
-// Gera URL publica via proxy do servidor (para Replicate acessar imagens do R2)
+// Gera URL publica via proxy do servidor (para Replicate e browser acessarem imagens do R2)
 export function getPublicProxyUrl(key: string) {
   const baseUrl = process.env.RAILWAY_PUBLIC_DOMAIN
     ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
     : 'http://localhost:3000'
   return `${baseUrl}/api/r2-proxy?key=${encodeURIComponent(key)}`
 }
-
