@@ -7,6 +7,7 @@ import { nanoid } from 'nanoid'
 const R2_BUCKET_NAME = process.env.R2_BUCKET_NAME || 'ensaio-studio'
 
 export async function POST(req: NextRequest) {
+  try {
   const formData = await req.formData()
   const file = formData.get('file') as File
   const ensaioId = formData.get('ensaioId') as string
@@ -54,8 +55,12 @@ export async function POST(req: NextRequest) {
   }
 
   return NextResponse.json({ key, success: true })
+  } catch (error: any) {
+    console.error('[Upload Error]', error)
+    return NextResponse.json({ error: error.message || 'Erro no upload' }, { status: 500 })
+  }
 }
 
-export const config = {
-  api: { bodyParser: false },
-}
+// Next.js App Router: aumentar limite de body para 50MB
+export const maxDuration = 60
+export const dynamic = 'force-dynamic'
