@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { replicate } from '@/lib/replicate'
-import { getPublicProxyUrl } from '@/lib/r2'
+import { r2Client, getPublicProxyUrl } from '@/lib/r2'
+import { GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3'
+import JSZip from 'jszip'
+
+const R2_BUCKET_NAME = process.env.R2_BUCKET_NAME || 'ensaio-studio'
 
 // POST /api/ensaios/[id]/train — treinar LoRA (roda em background)
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -23,9 +27,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     return NextResponse.json({ message: 'Treino ja em andamento' })
   }
 
-  // Gerar URLs publicas via proxy (para Replicate acessar)
-  const imageUrls = ensaio.referencePhotos.map((photo) => getPublicProxyUrl(photo.photoUrl))
-
   const triggerWord = `ENSAIO_${ensaioId.slice(0, 8).toUpperCase()}`
 
   // Criar/atualizar registro do LoRA
@@ -38,14 +39,51 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   await db.ensaio.update({ where: { id: ensaioId }, data: { status: 'training' } })
 
   // Disparar treino em background (nao bloqueia a resposta)
-  runTraining(ensaioId, loraModel.id, imageUrls, triggerWord).catch(console.error)
+  runTraining(ensaioId, loraModel.id, ensaio.referencePhotos, triggerWord).catch(console.error)
 
   return NextResponse.json({ status: 'training_started', loraModelId: loraModel.id })
 }
 
-async function runTraining(ensaioId: string, loraModelId: string, imageUrls: string[], triggerWord: string) {
+async function runTraining(
+  ensaioId: string,
+  loraModelId: string,
+  referencePhotos: { photoUrl: string }[],
+  triggerWord: string
+) {
   try {
-    // Buscar versao mais recente do modelo
+    // 1. Baixar fotos do R2 e criar ZIP
+    console.log(`[Train] Criando ZIP com ${referencePhotos.length} fotos...`)
+    const zip = new JSZip()
+
+    for (let i = 0; i < referencePhotos.length; i++) {
+      const key = referencePhotos[i].photoUrl
+      const ext = key.split('.').pop()?.toLowerCase() || 'jpg'
+      const response = await r2Client.send(new GetObjectCommand({
+        Bucket: R2_BUCKET_NAME,
+        Key: key,
+      }))
+      if (!response.Body) throw new Error(`Foto nao encontrada no R2: ${key}`)
+      const bytes = await response.Body.transformToByteArray()
+      zip.file(`photo_${i + 1}.${ext}`, bytes)
+    }
+
+    const zipBuffer = await zip.generateAsync({ type: 'nodebuffer' })
+    console.log(`[Train] ZIP criado: ${(zipBuffer.length / 1024 / 1024).toFixed(1)}MB`)
+
+    // 2. Upload ZIP para R2
+    const zipKey = `ensaios/${ensaioId}/lora/training-images.zip`
+    await r2Client.send(new PutObjectCommand({
+      Bucket: R2_BUCKET_NAME,
+      Key: zipKey,
+      Body: zipBuffer,
+      ContentType: 'application/zip',
+    }))
+
+    // 3. Gerar URL publica do ZIP via proxy
+    const zipUrl = getPublicProxyUrl(zipKey)
+    console.log(`[Train] ZIP disponivel via proxy`)
+
+    // 4. Buscar versao mais recente do modelo
     const trainerModel = await replicate.models.get('ostris', 'flux-dev-lora-trainer')
     const latestVersion = trainerModel.latest_version?.id
     if (!latestVersion) throw new Error('Versao do modelo nao encontrada')
@@ -54,7 +92,7 @@ async function runTraining(ensaioId: string, loraModelId: string, imageUrls: str
     const modelName = triggerWord.toLowerCase().replace(/[^a-z0-9_-]/g, '-')
     const destination = `${username}/${modelName}`
 
-    // Criar modelo de destino no Replicate (se nao existir)
+    // 5. Criar modelo de destino no Replicate (se nao existir)
     try {
       await replicate.models.get(username, modelName)
     } catch {
@@ -65,6 +103,7 @@ async function runTraining(ensaioId: string, loraModelId: string, imageUrls: str
       })
     }
 
+    // 6. Iniciar treino com URL do ZIP
     const training = await replicate.trainings.create(
       'ostris',
       'flux-dev-lora-trainer',
@@ -72,7 +111,7 @@ async function runTraining(ensaioId: string, loraModelId: string, imageUrls: str
       {
         destination: destination as `${string}/${string}`,
         input: {
-          input_images: imageUrls.join('\n'),
+          input_images: zipUrl,
           trigger_word: triggerWord,
           steps: 1000,
           learning_rate: 0.0004,
@@ -82,6 +121,8 @@ async function runTraining(ensaioId: string, loraModelId: string, imageUrls: str
         },
       }
     )
+
+    console.log(`[Train] Treino iniciado: ${training.id}`)
 
     await db.loraModel.update({
       where: { id: loraModelId },
@@ -122,6 +163,7 @@ async function runTraining(ensaioId: string, loraModelId: string, imageUrls: str
     })
 
     await db.ensaio.update({ where: { id: ensaioId }, data: { status: 'trained' } })
+    console.log(`[Train] Treino concluido com sucesso!`)
   } catch (error: any) {
     console.error('[Train Error]', error)
     await db.loraModel.update({
@@ -132,5 +174,5 @@ async function runTraining(ensaioId: string, loraModelId: string, imageUrls: str
   }
 }
 
-export const maxDuration = 300 // 5 minutos max para a resposta inicial
+export const maxDuration = 300
 export const dynamic = 'force-dynamic'
