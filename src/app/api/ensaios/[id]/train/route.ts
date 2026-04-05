@@ -48,16 +48,31 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 async function runTraining(ensaioId: string, loraModelId: string, imageUrls: string[], triggerWord: string) {
   try {
     // Buscar versao mais recente do modelo
-    const model = await replicate.models.get('ostris', 'flux-dev-lora-trainer')
-    const latestVersion = model.latest_version?.id
+    const trainerModel = await replicate.models.get('ostris', 'flux-dev-lora-trainer')
+    const latestVersion = trainerModel.latest_version?.id
     if (!latestVersion) throw new Error('Versao do modelo nao encontrada')
+
+    const username = process.env.REPLICATE_USERNAME || 'studio'
+    const modelName = triggerWord.toLowerCase().replace(/[^a-z0-9_-]/g, '-')
+    const destination = `${username}/${modelName}`
+
+    // Criar modelo de destino no Replicate (se nao existir)
+    try {
+      await replicate.models.get(username, modelName)
+    } catch {
+      await replicate.models.create(username, modelName, {
+        visibility: 'private',
+        hardware: 'gpu-a40-small',
+        description: `LoRA model for ensaio ${ensaioId}`,
+      })
+    }
 
     const training = await replicate.trainings.create(
       'ostris',
       'flux-dev-lora-trainer',
       latestVersion,
       {
-        destination: `${process.env.REPLICATE_USERNAME || 'studio'}/${triggerWord.toLowerCase()}` as `${string}/${string}`,
+        destination: destination as `${string}/${string}`,
         input: {
           input_images: imageUrls.join('\n'),
           trigger_word: triggerWord,
