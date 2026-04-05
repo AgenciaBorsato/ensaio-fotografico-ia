@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { replicate, MODELS, REPLICATE_VERSIONS } from '@/lib/replicate'
+import { replicate, REPLICATE_VERSIONS } from '@/lib/replicate'
 import { scoreFaceSimilarity, isFaceScoringAvailable } from '@/lib/face-scoring'
 import { getPresignedDownloadUrl } from '@/lib/r2'
 
@@ -34,8 +34,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 async function runGeneration(ensaioId: string, ensaio: any) {
   try {
     const triggerWord = ensaio.loraModel.triggerWord
-    const loraUrl = ensaio.loraModel.replicateModelUrl || ensaio.loraModel.loraUrl
     const inspirationContext = ensaio.inspirationPhotoUrl ? ', inspired by the reference style and mood' : ''
+
+    // Usar o modelo treinado diretamente no Replicate
+    const username = process.env.REPLICATE_USERNAME || 'studio'
+    const modelName = triggerWord.toLowerCase().replace(/[^a-z0-9_-]/g, '-')
+    const trainedModel = `${username}/${modelName}`
+    console.log(`[Generate] Usando modelo treinado: ${trainedModel}`)
 
     // Expandir prompts
     const allPrompts: string[] = []
@@ -62,10 +67,9 @@ async function runGeneration(ensaioId: string, ensaio: any) {
           })
 
           try {
-            // 1. Gerar com FLUX + LoRA
-            const rawUrl = await runPrediction(MODELS.FLUX_DEV_LORA, {
+            // 1. Gerar com modelo treinado (FLUX + LoRA integrado)
+            const rawUrl = await runPrediction(trainedModel, {
               prompt: fullPrompt,
-              hf_lora: loraUrl,
               num_outputs: 1,
               aspect_ratio: '3:4',
               output_format: 'png',
