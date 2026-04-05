@@ -44,3 +44,24 @@ export async function deleteObject(key: string) {
 export function buildR2Key(parts: { ensaioId: string; type: 'templates' | 'references' | 'inspiration' | 'lora' | 'generated' | 'upscaled' | 'restored'; filename: string }) {
   return `ensaios/${parts.ensaioId}/${parts.type}/${parts.filename}`
 }
+
+// Gera URL publica via proxy do servidor (para Replicate acessar imagens do R2)
+export function getPublicProxyUrl(key: string) {
+  const baseUrl = process.env.RAILWAY_PUBLIC_DOMAIN
+    ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
+    : process.env.NEXTAUTH_URL || 'http://localhost:3000'
+  const token = process.env.REPLICATE_API_TOKEN || ''
+  return `${baseUrl}/api/r2-proxy?key=${encodeURIComponent(key)}&token=${encodeURIComponent(token)}`
+}
+
+// Baixa arquivo do R2 como Buffer
+export async function downloadFromR2(key: string): Promise<Buffer> {
+  const command = new GetObjectCommand({
+    Bucket: R2_BUCKET_NAME,
+    Key: key,
+  })
+  const response = await r2Client.send(command)
+  if (!response.Body) throw new Error(`Arquivo nao encontrado: ${key}`)
+  const bytes = await response.Body.transformToByteArray()
+  return Buffer.from(bytes)
+}

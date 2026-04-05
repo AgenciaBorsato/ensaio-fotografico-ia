@@ -6,7 +6,7 @@ export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
 
   // Rotas publicas (nao precisam de senha)
-  if (pathname === '/login' || pathname.startsWith('/api/webhooks') || pathname.startsWith('/_next') || pathname.startsWith('/favicon')) {
+  if (pathname === '/login' || pathname.startsWith('/api/webhooks') || pathname.startsWith('/api/r2-proxy') || pathname.startsWith('/_next') || pathname.startsWith('/favicon')) {
     return NextResponse.next()
   }
 

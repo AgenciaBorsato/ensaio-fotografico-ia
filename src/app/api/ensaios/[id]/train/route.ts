@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { replicate } from '@/lib/replicate'
-import { getPresignedDownloadUrl } from '@/lib/r2'
+import { getPublicProxyUrl } from '@/lib/r2'
 
 // POST /api/ensaios/[id]/train — treinar LoRA (roda em background)
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -23,10 +23,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     return NextResponse.json({ message: 'Treino ja em andamento' })
   }
 
-  // Gerar URLs das fotos de referencia
-  const imageUrls = await Promise.all(
-    ensaio.referencePhotos.map((photo) => getPresignedDownloadUrl(photo.photoUrl))
-  )
+  // Gerar URLs publicas via proxy (para Replicate acessar)
+  const imageUrls = ensaio.referencePhotos.map((photo) => getPublicProxyUrl(photo.photoUrl))
 
   const triggerWord = `ENSAIO_${ensaioId.slice(0, 8).toUpperCase()}`
 
