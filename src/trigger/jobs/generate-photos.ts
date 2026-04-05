@@ -1,70 +1,56 @@
-import { task } from '@trigger.dev/sdk/v3'
+import { task, tasks } from '@trigger.dev/sdk/v3'
 import { db } from '@/lib/db'
-import { replicate, MODELS, REPLICATE_VERSIONS } from '@/lib/replicate'
-import { getPresignedDownloadUrl, getPresignedUploadUrl, buildR2Key } from '@/lib/r2'
+import { replicate, MODELS } from '@/lib/replicate'
+import type { upscalePhotoJob } from './upscale-photo'
 
-const BATCH_SIZE = 3 // maximo de fotos geradas em paralelo
+const BATCH_SIZE = 3
 
 export const generatePhotosJob = task({
   id: 'generate-photos',
   retry: { maxAttempts: 1 },
-  run: async (payload: { clientId: string; ensaioId: string; templatePhotoIds?: string[] }) => {
-    const { clientId, ensaioId, templatePhotoIds } = payload
-
-    // 1. Buscar dados
-    const client = await db.client.findUniqueOrThrow({
-      where: { id: clientId },
-      include: {
-        loraModel: true,
-        referencePhotos: true,
-      },
-    })
-
-    if (!client.loraModel || client.loraModel.status !== 'completed') {
-      throw new Error('LoRA nao treinado. Execute o treino primeiro.')
-    }
+  run: async (payload: { ensaioId: string }) => {
+    const { ensaioId } = payload
 
     const ensaio = await db.ensaio.findUniqueOrThrow({
       where: { id: ensaioId },
-      include: {
-        templatePhotos: templatePhotoIds
-          ? { where: { id: { in: templatePhotoIds } }, orderBy: { order: 'asc' } }
-          : { orderBy: { order: 'asc' } },
-      },
+      include: { loraModel: true },
     })
 
-    if (ensaio.templatePhotos.length === 0) {
-      throw new Error('Nenhuma foto template encontrada.')
+    if (!ensaio.loraModel || ensaio.loraModel.status !== 'completed') {
+      throw new Error('LoRA nao treinado.')
     }
 
-    await db.ensaio.update({
-      where: { id: ensaioId },
-      data: { status: 'generating' },
-    })
-
-    // 2. Buscar foto de inspiracao (se existir)
-    let inspirationContext = ''
-    if (client.inspirationPhotoUrl) {
-      inspirationContext = ', inspired by the reference style and mood'
+    if (ensaio.prompts.length === 0) {
+      throw new Error('Adicione pelo menos um prompt de geracao.')
     }
 
-    const triggerWord = client.loraModel.triggerWord
-    const loraUrl = client.loraModel.replicateModelUrl || client.loraModel.loraUrl
+    await db.ensaio.update({ where: { id: ensaioId }, data: { status: 'generating' } })
 
-    // 3. Processar em batches de 3
-    const templates = ensaio.templatePhotos
-    const results: { templatePhotoId: string; generatedPhotoId: string }[] = []
+    const triggerWord = ensaio.loraModel.triggerWord
+    const loraUrl = ensaio.loraModel.replicateModelUrl || ensaio.loraModel.loraUrl
+    const inspirationContext = ensaio.inspirationPhotoUrl ? ', inspired by the reference style and mood' : ''
 
-    for (let i = 0; i < templates.length; i += BATCH_SIZE) {
-      const batch = templates.slice(i, i + BATCH_SIZE)
+    // Expandir prompts conforme photosPerPrompt
+    const allPrompts: string[] = []
+    for (const prompt of ensaio.prompts) {
+      for (let j = 0; j < ensaio.photosPerPrompt; j++) {
+        allPrompts.push(prompt)
+      }
+    }
+
+    const results: { generatedPhotoId: string }[] = []
+
+    for (let i = 0; i < allPrompts.length; i += BATCH_SIZE) {
+      const batch = allPrompts.slice(i, i + BATCH_SIZE)
 
       const batchResults = await Promise.allSettled(
-        batch.map(async (template) => {
-          // Criar registro no banco
+        batch.map(async (promptText) => {
+          const fullPrompt = `${promptText}, photo of ${triggerWord}${inspirationContext}, professional photography, high quality, detailed face, sharp focus, 8k`
+
           const generatedPhoto = await db.generatedPhoto.create({
             data: {
-              clientId,
-              templatePhotoId: template.id,
+              ensaioId,
+              prompt: promptText,
               status: 'generating',
               attempt: 1,
               seed: Math.floor(Math.random() * 2147483647),
@@ -72,16 +58,10 @@ export const generatePhotosJob = task({
           })
 
           try {
-            // Construir prompt
-            const prompt = template.prompt
-              ? `${template.prompt}, photo of ${triggerWord}${inspirationContext}, professional photography, high quality, detailed face`
-              : `A professional photo of ${triggerWord}${inspirationContext}, natural lighting, sharp details, 8k quality`
-
-            // Chamar FLUX.1-dev com LoRA
             const prediction = await replicate.predictions.create({
               model: MODELS.FLUX_DEV_LORA,
               input: {
-                prompt,
+                prompt: fullPrompt,
                 hf_lora: loraUrl,
                 num_outputs: 1,
                 aspect_ratio: '3:4',
@@ -93,36 +73,29 @@ export const generatePhotosJob = task({
               },
             })
 
-            // Aguardar resultado
             let result = prediction
             let pollCount = 0
-            while (
-              result.status !== 'succeeded' &&
-              result.status !== 'failed' &&
-              pollCount < 60
-            ) {
+            while (result.status !== 'succeeded' && result.status !== 'failed' && pollCount < 60) {
               await new Promise((r) => setTimeout(r, 3000))
               result = await replicate.predictions.get(prediction.id)
               pollCount++
             }
 
-            if (result.status === 'failed') {
-              throw new Error(`Geracao falhou: ${result.error}`)
-            }
+            if (result.status === 'failed') throw new Error(`Geracao falhou: ${result.error}`)
 
             const outputUrl = Array.isArray(result.output) ? result.output[0] : result.output
 
-            // Atualizar foto no banco
             await db.generatedPhoto.update({
               where: { id: generatedPhoto.id },
-              data: {
-                rawUrl: outputUrl as string,
-                status: 'upscaling',
-                replicatePredictionId: prediction.id,
-              },
+              data: { rawUrl: outputUrl as string, status: 'upscaling', replicatePredictionId: prediction.id },
             })
 
-            return { templatePhotoId: template.id, generatedPhotoId: generatedPhoto.id }
+            // Disparar upscale automaticamente
+            await tasks.trigger<typeof upscalePhotoJob>('upscale-photo', {
+              generatedPhotoId: generatedPhoto.id,
+            })
+
+            return { generatedPhotoId: generatedPhoto.id }
           } catch (error: any) {
             await db.generatedPhoto.update({
               where: { id: generatedPhoto.id },
@@ -133,22 +106,15 @@ export const generatePhotosJob = task({
         })
       )
 
-      // Coletar resultados do batch
       for (const result of batchResults) {
-        if (result.status === 'fulfilled') {
-          results.push(result.value)
-        }
+        if (result.status === 'fulfilled') results.push(result.value)
       }
     }
 
-    // 4. Atualizar status do ensaio
     if (results.length > 0) {
-      await db.ensaio.update({
-        where: { id: ensaioId },
-        data: { status: 'completed' },
-      })
+      await db.ensaio.update({ where: { id: ensaioId }, data: { status: 'completed' } })
     }
 
-    return { generated: results.length, total: templates.length, results }
+    return { generated: results.length, total: allPrompts.length, results }
   },
 })

@@ -1,17 +1,16 @@
 import { task } from '@trigger.dev/sdk/v3'
 import { db } from '@/lib/db'
-import { replicate, MODELS } from '@/lib/replicate'
+import { replicate } from '@/lib/replicate'
 import { getPresignedDownloadUrl } from '@/lib/r2'
 
 export const trainLoraJob = task({
   id: 'train-lora',
   retry: { maxAttempts: 2 },
-  run: async (payload: { clientId: string; ensaioId: string }) => {
-    const { clientId, ensaioId } = payload
+  run: async (payload: { ensaioId: string }) => {
+    const { ensaioId } = payload
 
-    // 1. Buscar dados do cliente e fotos de referencia
-    const client = await db.client.findUniqueOrThrow({
-      where: { id: clientId },
+    const ensaio = await db.ensaio.findUniqueOrThrow({
+      where: { id: ensaioId },
       include: {
         referencePhotos: { orderBy: { order: 'asc' } },
         loraModel: true,
@@ -19,43 +18,28 @@ export const trainLoraJob = task({
     })
 
     // Se ja tem LoRA treinado, reutilizar
-    if (client.loraModel?.status === 'completed' && client.loraModel.loraUrl) {
-      return { loraModelId: client.loraModel.id, reused: true }
+    if (ensaio.loraModel?.status === 'completed' && ensaio.loraModel.loraUrl) {
+      return { loraModelId: ensaio.loraModel.id, reused: true }
     }
 
-    // 2. Gerar URLs de download das fotos de referencia
+    // Gerar URLs de download das fotos de referencia
     const imageUrls = await Promise.all(
-      client.referencePhotos.map(async (photo) => {
-        return getPresignedDownloadUrl(photo.photoUrl)
-      })
+      ensaio.referencePhotos.map((photo) => getPresignedDownloadUrl(photo.photoUrl))
     )
 
-    // 3. Criar trigger word unico
-    const triggerWord = `ENSAIO_${clientId.slice(0, 8).toUpperCase()}`
+    const triggerWord = `ENSAIO_${ensaioId.slice(0, 8).toUpperCase()}`
 
-    // 4. Criar registro do LoRA no banco
+    // Criar/atualizar registro do LoRA
     const loraModel = await db.loraModel.upsert({
-      where: { clientId },
-      create: {
-        clientId,
-        triggerWord,
-        status: 'processing',
-      },
-      update: {
-        status: 'processing',
-        progress: 0,
-        errorMessage: null,
-      },
+      where: { ensaioId },
+      create: { ensaioId, triggerWord, status: 'processing' },
+      update: { status: 'processing', progress: 0, errorMessage: null },
     })
 
-    // 5. Atualizar status do ensaio
-    await db.ensaio.update({
-      where: { id: ensaioId },
-      data: { status: 'training' },
-    })
+    await db.ensaio.update({ where: { id: ensaioId }, data: { status: 'training' } })
 
     try {
-      // 6. Iniciar treino no Replicate
+      // Iniciar treino no Replicate
       const training = await replicate.trainings.create(
         'ostris',
         'flux-dev-lora-trainer',
@@ -74,19 +58,15 @@ export const trainLoraJob = task({
         }
       )
 
-      // 7. Salvar ID do treino
       await db.loraModel.update({
         where: { id: loraModel.id },
-        data: {
-          replicateTrainingId: training.id,
-          progress: 10,
-        },
+        data: { replicateTrainingId: training.id, progress: 10 },
       })
 
-      // 8. Aguardar conclusao do treino (polling)
+      // Aguardar conclusao (polling)
       let trainingResult = training
       let pollCount = 0
-      const maxPolls = 180 // 30 min max (10s intervals)
+      const maxPolls = 180
 
       while (
         trainingResult.status !== 'succeeded' &&
@@ -94,23 +74,19 @@ export const trainLoraJob = task({
         trainingResult.status !== 'canceled' &&
         pollCount < maxPolls
       ) {
-        await new Promise((r) => setTimeout(r, 10000)) // 10s entre polls
+        await new Promise((r) => setTimeout(r, 10000))
         trainingResult = await replicate.trainings.get(training.id)
         pollCount++
-
-        // Atualizar progresso
-        const progress = Math.min(10 + Math.floor((pollCount / maxPolls) * 80), 90)
         await db.loraModel.update({
           where: { id: loraModel.id },
-          data: { progress },
+          data: { progress: Math.min(10 + Math.floor((pollCount / maxPolls) * 80), 90) },
         })
       }
 
-      if (trainingResult.status === 'failed' || trainingResult.status === 'canceled') {
+      if (trainingResult.status !== 'succeeded') {
         throw new Error(`Treino ${trainingResult.status}: ${trainingResult.error || 'Erro desconhecido'}`)
       }
 
-      // 9. Treino concluido — salvar resultado
       const loraUrl = (trainingResult.output as any)?.weights || (trainingResult.output as any)?.version
       const modelUrl = (trainingResult as any).model
 
@@ -125,26 +101,15 @@ export const trainLoraJob = task({
         },
       })
 
-      await db.ensaio.update({
-        where: { id: ensaioId },
-        data: { status: 'trained' },
-      })
+      await db.ensaio.update({ where: { id: ensaioId }, data: { status: 'trained' } })
 
-      return { loraModelId: loraModel.id, reused: false, trainingId: training.id }
+      return { loraModelId: loraModel.id, reused: false }
     } catch (error: any) {
       await db.loraModel.update({
         where: { id: loraModel.id },
-        data: {
-          status: 'failed',
-          errorMessage: error.message,
-        },
+        data: { status: 'failed', errorMessage: error.message },
       })
-
-      await db.ensaio.update({
-        where: { id: ensaioId },
-        data: { status: 'trained' }, // volta pro status anterior
-      })
-
+      await db.ensaio.update({ where: { id: ensaioId }, data: { status: 'draft' } })
       throw error
     }
   },

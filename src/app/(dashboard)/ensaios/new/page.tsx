@@ -30,7 +30,7 @@ export default function NewEnsaioPage() {
       }
 
       const ensaio = await res.json()
-      router.push(`/photographer/ensaios/${ensaio.id}`)
+      router.push(`/ensaios/${ensaio.id}`)
     } catch (err: any) {
       setError(err.message)
     } finally {
@@ -43,7 +43,7 @@ export default function NewEnsaioPage() {
       <h2 className="font-display text-3xl font-normal mb-2">
         Novo <span className="text-gold-400 italic">Ensaio</span>
       </h2>
-      <p className="text-sm text-white/35 mb-8">Crie um novo ensaio e convide seus clientes</p>
+      <p className="text-sm text-white/35 mb-8">Crie um novo ensaio fotografico com IA</p>
 
       {error && (
         <div className="bg-red-500/[0.08] border border-red-500/20 rounded-xl px-4 py-3 mb-6 text-sm text-red-300">

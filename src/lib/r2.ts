@@ -41,10 +41,6 @@ export async function deleteObject(key: string) {
   return r2Client.send(command)
 }
 
-export function buildR2Key(parts: { ensaioId: string; clientId?: string; type: 'templates' | 'references' | 'inspiration' | 'lora' | 'generated' | 'upscaled' | 'restored'; filename: string }) {
-  const { ensaioId, clientId, type, filename } = parts
-  if (clientId) {
-    return `ensaios/${ensaioId}/clients/${clientId}/${type}/${filename}`
-  }
-  return `ensaios/${ensaioId}/${type}/${filename}`
+export function buildR2Key(parts: { ensaioId: string; type: 'templates' | 'references' | 'inspiration' | 'lora' | 'generated' | 'upscaled' | 'restored'; filename: string }) {
+  return `ensaios/${parts.ensaioId}/${parts.type}/${parts.filename}`
 }

@@ -1,39 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { auth } from '@clerk/nextjs/server'
 import { db } from '@/lib/db'
 import { tasks } from '@trigger.dev/sdk/v3'
 import type { generatePhotosJob } from '@/trigger/jobs/generate-photos'
 
+// POST /api/ensaios/[id]/generate — gerar fotos
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const { userId: clerkId } = await auth()
-  if (!clerkId) return NextResponse.json({ error: 'Nao autorizado' }, { status: 401 })
-
   const { id: ensaioId } = await params
-  const { clientId, templatePhotoIds } = await req.json()
 
-  const user = await db.user.findUnique({ where: { clerkId } })
-  if (!user) return NextResponse.json({ error: 'Usuario nao encontrado' }, { status: 404 })
-
-  const ensaio = await db.ensaio.findUnique({ where: { id: ensaioId } })
-  if (!ensaio || ensaio.photographerId !== user.id) {
-    return NextResponse.json({ error: 'Ensaio nao encontrado' }, { status: 404 })
-  }
-
-  // Verificar que o cliente tem LoRA treinado
-  const client = await db.client.findUnique({
-    where: { id: clientId },
+  const ensaio = await db.ensaio.findUnique({
+    where: { id: ensaioId },
     include: { loraModel: true },
   })
 
-  if (!client?.loraModel || client.loraModel.status !== 'completed') {
-    return NextResponse.json({ error: 'LoRA nao treinado ainda' }, { status: 400 })
+  if (!ensaio) return NextResponse.json({ error: 'Ensaio nao encontrado' }, { status: 404 })
+  if (!ensaio.loraModel || ensaio.loraModel.status !== 'completed') {
+    return NextResponse.json({ error: 'Treine a IA primeiro' }, { status: 400 })
+  }
+  if (ensaio.prompts.length === 0) {
+    return NextResponse.json({ error: 'Adicione pelo menos um prompt' }, { status: 400 })
   }
 
-  const handle = await tasks.trigger<typeof generatePhotosJob>('generate-photos', {
-    clientId,
-    ensaioId,
-    templatePhotoIds,
-  })
+  const handle = await tasks.trigger<typeof generatePhotosJob>('generate-photos', { ensaioId })
 
   return NextResponse.json({ jobId: handle.id, status: 'triggered' })
 }

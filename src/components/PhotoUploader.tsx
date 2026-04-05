@@ -4,37 +4,29 @@ import { useState, useRef, useCallback } from 'react'
 
 interface PhotoUploaderProps {
   ensaioId: string
-  clientId?: string
   type: 'templates' | 'references' | 'inspiration'
   maxFiles: number
   onUploadComplete?: () => void
 }
 
-export default function PhotoUploader({ ensaioId, clientId, type, maxFiles, onUploadComplete }: PhotoUploaderProps) {
+export default function PhotoUploader({ ensaioId, type, maxFiles, onUploadComplete }: PhotoUploaderProps) {
   const [uploading, setUploading] = useState(false)
   const [progress, setProgress] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const [uploadedCount, setUploadedCount] = useState(0)
+  const [totalFiles, setTotalFiles] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
 
   const uploadFile = async (file: File) => {
-    // 1. Pedir presigned URL
     const presignRes = await fetch('/api/upload/presign', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        ensaioId,
-        clientId,
-        type,
-        contentType: file.type,
-        filename: file.name,
-      }),
+      body: JSON.stringify({ ensaioId, type, contentType: file.type, filename: file.name }),
     })
 
     if (!presignRes.ok) throw new Error('Erro ao obter URL de upload')
     const { uploadUrl, key } = await presignRes.json()
 
-    // 2. Upload direto para R2
     const uploadRes = await fetch(uploadUrl, {
       method: 'PUT',
       headers: { 'Content-Type': file.type },
@@ -42,7 +34,6 @@ export default function PhotoUploader({ ensaioId, clientId, type, maxFiles, onUp
     })
 
     if (!uploadRes.ok) throw new Error('Erro no upload')
-
     return key
   }
 
@@ -54,6 +45,7 @@ export default function PhotoUploader({ ensaioId, clientId, type, maxFiles, onUp
     setError(null)
     setProgress(0)
     setUploadedCount(0)
+    setTotalFiles(imageFiles.length)
 
     try {
       for (let i = 0; i < imageFiles.length; i++) {
@@ -67,12 +59,12 @@ export default function PhotoUploader({ ensaioId, clientId, type, maxFiles, onUp
     } finally {
       setUploading(false)
     }
-  }, [ensaioId, clientId, type, maxFiles, onUploadComplete])
+  }, [ensaioId, type, maxFiles, onUploadComplete])
 
   const labels = {
-    templates: { title: 'Fotos do ensaio', desc: 'Arraste as fotos template do ensaio', icon: '📸' },
-    references: { title: 'Fotos de referencia', desc: 'Arraste 1-12 fotos do rosto do cliente', icon: '👤' },
-    inspiration: { title: 'Foto de inspiracao', desc: 'Arraste a foto de inspiracao (estilo/mood)', icon: '✨' },
+    templates: { desc: 'Arraste as fotos template do ensaio', icon: '📸' },
+    references: { desc: 'Arraste 1-12 fotos do rosto do cliente', icon: '👤' },
+    inspiration: { desc: 'Arraste a foto de inspiracao (estilo/mood)', icon: '✨' },
   }
 
   const label = labels[type]
@@ -91,19 +83,18 @@ export default function PhotoUploader({ ensaioId, clientId, type, maxFiles, onUp
       >
         {uploading ? (
           <div>
-            <p className="text-sm text-gold-400 font-semibold mb-2">Enviando {uploadedCount}/{progress > 0 ? Math.ceil(uploadedCount / (progress / 100)) : '?'}...</p>
+            <p className="text-sm text-gold-400 font-semibold mb-2">Enviando {uploadedCount}/{totalFiles}...</p>
             <div className="max-w-xs mx-auto">
               <div className="w-full h-1 bg-white/[0.06] rounded-full overflow-hidden">
                 <div className="h-full bg-gold-400 rounded-full transition-all" style={{ width: `${progress}%` }} />
               </div>
-              <p className="text-xs text-white/25 mt-1">{progress}%</p>
             </div>
           </div>
         ) : (
           <>
             <div className="text-3xl mb-2 opacity-70">{label.icon}</div>
             <p className="font-display text-sm text-gold-400 font-semibold mb-1">{label.desc}</p>
-            <p className="text-xs text-white/30">JPG, PNG ou WEBP - Maximo 5MB cada</p>
+            <p className="text-xs text-white/30">JPG, PNG ou WEBP - Maximo 50MB cada</p>
           </>
         )}
         <input
@@ -115,10 +106,7 @@ export default function PhotoUploader({ ensaioId, clientId, type, maxFiles, onUp
           className="hidden"
         />
       </div>
-
-      {error && (
-        <p className="text-xs text-red-400 mt-2">{error}</p>
-      )}
+      {error && <p className="text-xs text-red-400 mt-2">{error}</p>}
     </div>
   )
 }

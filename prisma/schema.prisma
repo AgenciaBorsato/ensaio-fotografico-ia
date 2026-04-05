@@ -7,14 +7,8 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-enum Role {
-  photographer
-  client
-}
-
 enum EnsaioStatus {
   draft
-  awaiting_references
   training
   trained
   generating
@@ -38,110 +32,65 @@ enum PhotoStatus {
   rejected
 }
 
-model User {
-  id        String   @id @default(cuid())
-  clerkId   String   @unique
-  email     String   @unique
-  name      String
-  role      Role     @default(client)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  ensaios Ensaio[]
-  clients Client[]
-}
-
 model Ensaio {
-  id             String       @id @default(cuid())
-  name           String
-  description    String?
-  inviteCode     String       @unique
-  status         EnsaioStatus @default(draft)
-  photographerId String
-  photographer   User         @relation(fields: [photographerId], references: [id])
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+  id          String       @id @default(cuid())
+  name        String
+  description String?
+  status      EnsaioStatus @default(draft)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
 
-  templatePhotos TemplatePhoto[]
-  clients        Client[]
+  inspirationPhotoUrl String?
 
-  @@index([photographerId])
-  @@index([inviteCode])
+  // Prompts para geracao (cada linha = 1 foto a gerar)
+  prompts String[] @default([])
+  // Quantidade de fotos a gerar por prompt
+  photosPerPrompt Int @default(1)
+
+  referencePhotos ReferencePhoto[]
+  loraModel       LoraModel?
+  generatedPhotos GeneratedPhoto[]
 }
 
-model TemplatePhoto {
+model ReferencePhoto {
   id       String @id @default(cuid())
   ensaioId String
   ensaio   Ensaio @relation(fields: [ensaioId], references: [id], onDelete: Cascade)
   photoUrl String
   order    Int
-  prompt   String @default("")
 
   createdAt DateTime @default(now())
-
-  generatedPhotos GeneratedPhoto[]
 
   @@index([ensaioId])
-}
-
-model Client {
-  id                 String  @id @default(cuid())
-  userId             String
-  user               User    @relation(fields: [userId], references: [id])
-  ensaioId           String
-  ensaio             Ensaio  @relation(fields: [ensaioId], references: [id], onDelete: Cascade)
-  inspirationPhotoUrl String?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  referencePhotos ReferencePhoto[]
-  loraModel       LoraModel?
-  generatedPhotos GeneratedPhoto[]
-
-  @@unique([userId, ensaioId])
-  @@index([ensaioId])
-}
-
-model ReferencePhoto {
-  id       String @id @default(cuid())
-  clientId String
-  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  photoUrl String
-  order    Int
-
-  createdAt DateTime @default(now())
-
-  @@index([clientId])
 }
 
 model LoraModel {
-  id                   String         @id @default(cuid())
-  clientId             String         @unique
-  client               Client         @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  replicateTrainingId  String?
-  status               TrainingStatus @default(pending)
-  progress             Int            @default(0)
-  loraUrl              String?
-  triggerWord          String
-  replicateModelUrl    String?
-  trainingCostUsd      Float?
-  errorMessage         String?
+  id                  String         @id @default(cuid())
+  ensaioId            String         @unique
+  ensaio              Ensaio         @relation(fields: [ensaioId], references: [id], onDelete: Cascade)
+  replicateTrainingId String?
+  status              TrainingStatus @default(pending)
+  progress            Int            @default(0)
+  loraUrl             String?
+  triggerWord         String
+  replicateModelUrl   String?
+  trainingCostUsd     Float?
+  errorMessage        String?
 
   createdAt   DateTime  @default(now())
   completedAt DateTime?
 }
 
 model GeneratedPhoto {
-  id              String      @id @default(cuid())
-  clientId        String
-  client          Client      @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  templatePhotoId String
-  templatePhoto   TemplatePhoto @relation(fields: [templatePhotoId], references: [id], onDelete: Cascade)
+  id       String      @id @default(cuid())
+  ensaioId String
+  ensaio   Ensaio      @relation(fields: [ensaioId], references: [id], onDelete: Cascade)
 
-  rawUrl       String?
-  upscaledUrl  String?
-  restoredUrl  String?
+  prompt String // o prompt usado para gerar essa foto
+
+  rawUrl      String?
+  upscaledUrl String?
+  restoredUrl String?
 
   similarityScore Float?
   attempt         Int         @default(1)
@@ -149,13 +98,12 @@ model GeneratedPhoto {
   status          PhotoStatus @default(generating)
   seed            Int?
 
-  photographerNotes String?
+  notes                 String?
   replicatePredictionId String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@index([clientId])
-  @@index([templatePhotoId])
+  @@index([ensaioId])
   @@index([status])
 }
