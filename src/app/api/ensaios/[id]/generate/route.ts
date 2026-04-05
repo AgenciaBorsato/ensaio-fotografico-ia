@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { replicate, REPLICATE_VERSIONS } from '@/lib/replicate'
+import { replicate, REPLICATE_VERSIONS, REPLICATE_MODELS } from '@/lib/replicate'
 import { scoreFaceSimilarity, isFaceScoringAvailable } from '@/lib/face-scoring'
 import { r2Client, getPresignedDownloadUrl, getPublicProxyUrl } from '@/lib/r2'
 import { PutObjectCommand } from '@aws-sdk/client-s3'
@@ -28,7 +28,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   const ensaio = await db.ensaio.findUnique({
     where: { id: ensaioId },
-    include: { loraModel: true },
+    include: { loraModel: true, referencePhotos: { orderBy: { order: 'asc' } } },
   })
 
   if (!ensaio) return NextResponse.json({ error: 'Ensaio nao encontrado' }, { status: 404 })
@@ -63,6 +63,12 @@ async function runGeneration(ensaioId: string, ensaio: any) {
     if (!trainedVersion) throw new Error(`Modelo ${trainedModel} nao tem versao disponivel`)
     console.log(`[Generate] Usando versao: ${trainedVersion}`)
 
+    // Preparar URL da melhor foto de referencia para face swap
+    // Usa a primeira foto (geralmente a melhor, frontal)
+    const bestRefPhoto = ensaio.referencePhotos[0]
+    const refPhotoUrl = bestRefPhoto ? getPublicProxyUrl(bestRefPhoto.photoUrl) : null
+    console.log(`[Generate] Face swap ref: ${refPhotoUrl ? 'disponivel' : 'nao disponivel'}`)
+
     // Expandir prompts
     const allPrompts: string[] = []
     for (const prompt of ensaio.prompts) {
@@ -88,7 +94,7 @@ async function runGeneration(ensaioId: string, ensaio: any) {
           })
 
           try {
-            // 1. Gerar com modelo treinado (FLUX + LoRA via version)
+            // 1. Gerar com modelo treinado (FLUX + LoRA)
             const rawUrl = await runPredictionByVersion(trainedVersion, {
               prompt: fullPrompt,
               num_outputs: 1,
@@ -102,19 +108,48 @@ async function runGeneration(ensaioId: string, ensaio: any) {
 
             if (!rawUrl) throw new Error('Geracao falhou')
 
-            // Persistir raw no R2 imediatamente (URL do Replicate expira em ~1h)
+            // Persistir raw no R2
             const rawR2Url = await persistToR2(rawUrl, ensaioId, generatedPhoto.id, 'raw')
             await db.generatedPhoto.update({
               where: { id: generatedPhoto.id },
-              data: { rawUrl: rawR2Url, status: 'upscaling' },
+              data: { rawUrl: rawR2Url, status: 'face_swapping' },
             })
 
-            // 2. Upscale com Real-ESRGAN
+            // 2. Face Swap — troca o rosto pela foto de referencia real
+            let imageForUpscale = rawUrl
+            if (refPhotoUrl) {
+              console.log(`[Generate] Face swap para ${generatedPhoto.id}...`)
+              try {
+                const swappedUrl = await runPredictionByModel(REPLICATE_MODELS.FACE_SWAP, {
+                  source_image: refPhotoUrl,
+                  target_image: rawUrl,
+                })
+                if (swappedUrl) {
+                  imageForUpscale = swappedUrl
+                  const swappedR2Url = await persistToR2(swappedUrl, ensaioId, generatedPhoto.id, 'swapped')
+                  await db.generatedPhoto.update({
+                    where: { id: generatedPhoto.id },
+                    data: { rawUrl: swappedR2Url },
+                  })
+                  console.log(`[Generate] Face swap OK para ${generatedPhoto.id}`)
+                }
+              } catch (swapErr: any) {
+                console.error(`[Generate] Face swap falhou para ${generatedPhoto.id}:`, swapErr.message)
+                // Continua com a imagem raw se o face swap falhar
+              }
+            }
+
+            await db.generatedPhoto.update({
+              where: { id: generatedPhoto.id },
+              data: { status: 'upscaling' },
+            })
+
+            // 3. Upscale com Real-ESRGAN
             const upscaledReplicateUrl = await runPredictionByVersion(REPLICATE_VERSIONS.REAL_ESRGAN, {
-              image: rawUrl,
+              image: imageForUpscale,
               scale: 4,
               face_enhance: true,
-            }) || rawUrl
+            }) || imageForUpscale
 
             const upscaledUrl = await persistToR2(upscaledReplicateUrl, ensaioId, generatedPhoto.id, 'upscaled')
             await db.generatedPhoto.update({
@@ -122,7 +157,7 @@ async function runGeneration(ensaioId: string, ensaio: any) {
               data: { upscaledUrl, status: 'restoring' },
             })
 
-            // 3. Restauracao facial com CodeFormer
+            // 4. Restauracao facial com CodeFormer
             const restoredReplicateUrl = await runPredictionByVersion(REPLICATE_VERSIONS.CODEFORMER, {
               image: upscaledReplicateUrl,
               upscale: 2,
@@ -136,7 +171,7 @@ async function runGeneration(ensaioId: string, ensaio: any) {
               data: { restoredUrl, status: 'scoring' },
             })
 
-            // 4. Face scoring (se disponivel)
+            // 5. Face scoring (se disponivel)
             try {
               const scoringAvailable = await isFaceScoringAvailable()
               if (scoringAvailable) {
@@ -176,6 +211,13 @@ async function runGeneration(ensaioId: string, ensaio: any) {
     console.error('[Generate Error]', error)
     await db.ensaio.update({ where: { id: ensaioId }, data: { status: 'trained' } })
   }
+}
+
+async function runPredictionByModel(model: string, input: Record<string, any>): Promise<string | null> {
+  const output = await replicate.run(model as `${string}/${string}`, { input })
+  if (typeof output === 'string') return output
+  if (Array.isArray(output) && output.length > 0) return String(output[0])
+  return null
 }
 
 async function runPredictionByVersion(version: string, input: Record<string, any>): Promise<string | null> {

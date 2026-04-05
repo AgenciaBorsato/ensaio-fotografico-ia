@@ -44,7 +44,7 @@ export default function EnsaioDetailPage() {
   useEffect(() => {
     const isActive = ensaio?.status === 'training' || ensaio?.status === 'generating' ||
       ensaio?.loraModel?.status === 'processing' ||
-      ensaio?.generatedPhotos.some(p => ['generating', 'upscaling', 'restoring', 'scoring'].includes(p.status))
+      ensaio?.generatedPhotos.some(p => ['generating', 'face_swapping', 'upscaling', 'restoring', 'scoring'].includes(p.status))
 
     if (isActive) {
       pollingRef.current = setInterval(fetchEnsaio, 5000)
@@ -299,7 +299,7 @@ export default function EnsaioDetailPage() {
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
             {ensaio.generatedPhotos.map((photo) => {
               const imgSrc = photo.restoredUrl || photo.rawUrl
-              const isProcessing = ['generating', 'upscaling', 'restoring', 'scoring'].includes(photo.status)
+              const isProcessing = ['generating', 'face_swapping', 'upscaling', 'restoring', 'scoring'].includes(photo.status)
               return (
                 <div key={photo.id} className="aspect-[3/4] rounded-xl bg-white/[0.04] border border-gold-400/10 overflow-hidden relative">
                   {imgSrc ? (

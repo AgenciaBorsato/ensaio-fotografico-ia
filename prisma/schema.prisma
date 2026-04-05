@@ -25,6 +25,7 @@ enum TrainingStatus {
 
 enum PhotoStatus {
   generating
+  face_swapping
   upscaling
   restoring
   scoring
