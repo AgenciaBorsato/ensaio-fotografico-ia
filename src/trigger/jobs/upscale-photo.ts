@@ -1,6 +1,7 @@
-import { task } from '@trigger.dev/sdk/v3'
+import { task, tasks } from '@trigger.dev/sdk/v3'
 import { db } from '@/lib/db'
 import { replicate, REPLICATE_VERSIONS } from '@/lib/replicate'
+import type { scorePhotoJob } from './score-photo'
 
 export const upscalePhotoJob = task({
   id: 'upscale-photo',
@@ -45,7 +46,12 @@ export const upscalePhotoJob = task({
 
     await db.generatedPhoto.update({
       where: { id: generatedPhotoId },
-      data: { restoredUrl, status: 'pending_review' },
+      data: { restoredUrl, status: 'scoring' },
+    })
+
+    // Disparar face scoring automaticamente
+    await tasks.trigger<typeof scorePhotoJob>('score-photo', {
+      generatedPhotoId,
     })
 
     return { generatedPhotoId, upscaledUrl, restoredUrl }
