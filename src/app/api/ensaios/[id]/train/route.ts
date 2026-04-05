@@ -62,7 +62,7 @@ async function runTraining(ensaioId: string, loraModelId: string, imageUrls: str
     } catch {
       await replicate.models.create(username, modelName, {
         visibility: 'private',
-        hardware: 'gpu-a40-small',
+        hardware: 'gpu-t4',
         description: `LoRA model for ensaio ${ensaioId}`,
       })
     }
