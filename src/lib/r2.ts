@@ -50,8 +50,7 @@ export function getPublicProxyUrl(key: string) {
   const baseUrl = process.env.RAILWAY_PUBLIC_DOMAIN
     ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
     : process.env.NEXTAUTH_URL || 'http://localhost:3000'
-  const token = process.env.REPLICATE_API_TOKEN || ''
-  return `${baseUrl}/api/r2-proxy?key=${encodeURIComponent(key)}&token=${encodeURIComponent(token)}`
+  return `${baseUrl}/api/r2-proxy?key=${encodeURIComponent(key)}`
 }
 
 // Baixa arquivo do R2 como Buffer

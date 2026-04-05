@@ -4,13 +4,13 @@ import { GetObjectCommand } from '@aws-sdk/client-s3'
 
 const R2_BUCKET_NAME = process.env.R2_BUCKET_NAME || 'ensaio-studio'
 
-// GET /api/r2-proxy?key=ensaios/xxx/references/yyy.jpg&token=xxx
+// GET /api/r2-proxy?key=ensaios/xxx/references/yyy.jpg
 // Rota publica para servir arquivos do R2 (usado pelo Replicate para acessar imagens)
 export async function GET(req: NextRequest) {
   const key = req.nextUrl.searchParams.get('key')
-  const token = req.nextUrl.searchParams.get('token')
 
-  if (!key || !token || token !== process.env.REPLICATE_API_TOKEN) {
+  // Validar que a key parece ser um path valido do R2 (comeca com "ensaios/")
+  if (!key || !key.startsWith('ensaios/')) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
