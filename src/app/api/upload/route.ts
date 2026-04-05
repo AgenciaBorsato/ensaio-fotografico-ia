@@ -22,6 +22,17 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Tipo invalido' }, { status: 400 })
   }
 
+  // Validar tipo de arquivo (apenas imagens)
+  const validMimes = ['image/jpeg', 'image/png', 'image/webp']
+  if (!validMimes.includes(file.type)) {
+    return NextResponse.json({ error: 'Formato invalido. Use JPG, PNG ou WEBP' }, { status: 400 })
+  }
+
+  // Validar tamanho (max 50MB)
+  if (file.size > 50 * 1024 * 1024) {
+    return NextResponse.json({ error: 'Arquivo muito grande. Maximo 50MB' }, { status: 400 })
+  }
+
   const ensaio = await db.ensaio.findUnique({ where: { id: ensaioId } })
   if (!ensaio) return NextResponse.json({ error: 'Ensaio nao encontrado' }, { status: 404 })
 

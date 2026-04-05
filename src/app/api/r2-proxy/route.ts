@@ -9,8 +9,8 @@ const R2_BUCKET_NAME = process.env.R2_BUCKET_NAME || 'ensaio-studio'
 export async function GET(req: NextRequest) {
   const key = req.nextUrl.searchParams.get('key')
 
-  // Validar que a key parece ser um path valido do R2 (comeca com "ensaios/")
-  if (!key || !key.startsWith('ensaios/')) {
+  // Validar path: deve comecar com "ensaios/" e nao conter traversal
+  if (!key || !key.startsWith('ensaios/') || key.includes('..') || key.includes('\0')) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 

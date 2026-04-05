@@ -9,7 +9,7 @@ interface Ensaio {
   description: string | null
   status: string
   createdAt: string
-  _count: { templatePhotos: number; referencePhotos: number; generatedPhotos: number }
+  _count: { referencePhotos: number; generatedPhotos: number }
   loraModel: { status: string; progress: number } | null
 }
 
@@ -80,7 +80,6 @@ export default function EnsaiosPage() {
                 </div>
                 <div className="flex gap-6 mt-4 text-xs text-white/30">
                   <span>{ensaio._count.referencePhotos} refs</span>
-                  <span>{ensaio._count.templatePhotos} templates</span>
                   <span>{ensaio._count.generatedPhotos} geradas</span>
                   {ensaio.loraModel && (
                     <span className={ensaio.loraModel.status === 'completed' ? 'text-green-400' : 'text-blue-400'}>
