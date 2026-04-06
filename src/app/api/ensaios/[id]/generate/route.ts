@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { replicate, REPLICATE_VERSIONS, REPLICATE_MODELS } from '@/lib/replicate'
+import { replicate, REPLICATE_VERSIONS } from '@/lib/replicate'
 import { scoreFaceSimilarity, isFaceScoringAvailable } from '@/lib/face-scoring'
 import { r2Client, getPresignedDownloadUrl, getPublicProxyUrl } from '@/lib/r2'
 import { PutObjectCommand } from '@aws-sdk/client-s3'
@@ -115,12 +115,15 @@ async function runGeneration(ensaioId: string, ensaio: any) {
               data: { rawUrl: rawR2Url, status: 'face_swapping' },
             })
 
+            // Delay para evitar rate limit (credito < $5 = max 6 req/min)
+            await new Promise((r) => setTimeout(r, 12000))
+
             // 2. Face Swap — troca o rosto pela foto de referencia real
             let imageForUpscale = rawUrl
             if (refPhotoUrl) {
               console.log(`[Generate] Face swap para ${generatedPhoto.id}...`)
               try {
-                const swappedUrl = await runPredictionByModel(REPLICATE_MODELS.FACE_SWAP, {
+                const swappedUrl = await runPredictionByVersion(REPLICATE_VERSIONS.FACE_SWAP, {
                   source_image: refPhotoUrl,
                   target_image: rawUrl,
                 })
@@ -211,13 +214,6 @@ async function runGeneration(ensaioId: string, ensaio: any) {
     console.error('[Generate Error]', error)
     await db.ensaio.update({ where: { id: ensaioId }, data: { status: 'trained' } })
   }
-}
-
-async function runPredictionByModel(model: string, input: Record<string, any>): Promise<string | null> {
-  const output = await replicate.run(model as `${string}/${string}`, { input })
-  if (typeof output === 'string') return output
-  if (Array.isArray(output) && output.length > 0) return String(output[0])
-  return null
 }
 
 async function runPredictionByVersion(version: string, input: Record<string, any>): Promise<string | null> {
