@@ -5,7 +5,7 @@ import { scoreFaceSimilarity, isFaceScoringAvailable } from '@/lib/face-scoring'
 import { r2Client, getPresignedDownloadUrl, getPublicProxyUrl } from '@/lib/r2'
 import { PutObjectCommand } from '@aws-sdk/client-s3'
 
-const BATCH_SIZE = 3
+const BATCH_SIZE = 1  // Processar 1 por vez para evitar rate limit
 const R2_BUCKET_NAME = process.env.R2_BUCKET_NAME || 'ensaio-studio'
 
 async function persistToR2(url: string, ensaioId: string, photoId: string, suffix: string): Promise<string> {

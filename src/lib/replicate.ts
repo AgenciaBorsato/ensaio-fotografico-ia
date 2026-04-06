@@ -14,5 +14,5 @@ export const REPLICATE_VERSIONS = {
 } as const
 
 export const REPLICATE_MODELS = {
-  FACE_SWAP: 'yan-ops/face_swap',
+  FACE_SWAP: 'codeplugtech/face-swap',
 } as const
